@@ -2,7 +2,7 @@
 #include <math.h>
 #include <assert.h>
 #include <windows.h>
-#include <GL/gl.h> 
+#include <GL/gl.h>
 #include "invaders.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -22,10 +22,10 @@ bool should_quit_game = false;
 float current_dt = 1.0f / 60.0f;
 double last_time = 0;
 
-float live_y_max = 1.0f;
-float live_y_min = -0.1f;
+const float live_y_max = 1.0f;
+const float live_y_min = -0.1f;
 
-int num_desired_invaders = 15;
+const int num_desired_invaders = 15;
 const float INVADER_RADIUS = 0.03f;
 
 int num_shots_fired = 0;
@@ -62,7 +62,7 @@ struct Invader
     Vector2 target_position;
     Bitmap *bitmap;
 
-    float sleep_countdown = -1.0;
+    float sleep_countdown;
 };
 
 struct Particle
@@ -77,42 +77,45 @@ struct Particle
     Vector4 color;
 };
 
-const int particle_max = 1000;
+const int particle_max = 200;
+
+struct Bullet;
 
 struct Particle_Emitter
 {
     Vector2 position;
     Vector2 velocity;
 
-    int particle_count = 0;
-    Particle *particles[particle_max];
-    float fadeout_period = 0.1f;
-    float particles_per_second = 150.0f;
+    int particle_count;
+    Particle particles[particle_max];
+    float fadeout_period;
+    float particles_per_second;
 
-    float speed0 = 0;
-    float speed1 = 0.1f;
+    float speed0;
+    float speed1;
 
-    float size0 = 0.001f;
-    float size1 = 0.005f;
+    float size0;
+    float size1;
 
-    float drag0 = 0.9999f;
-    float drag1 = 0.9f;
+    float drag0;
+    float drag1;
 
-    float lifetime0 = 0.4f;
-    float lifetime1 = 1.0f;
+    float lifetime0;
+    float lifetime1;
 
-    float emitter_lifetime = -1.0f;
+    float emitter_lifetime;
 
-    float theta0 = 0;
-    float theta1 = TAU;
+    float theta0;
+    float theta1;
 
     Vector4 color0;
     Vector4 color1;
 
-    float elapsed = 0;
-    float remainder = 0;
+    float elapsed;
+    float remainder;
 
-    bool producing = true;
+    bool producing;
+    bool alive;
 };
 
 struct Bullet
@@ -124,22 +127,22 @@ struct Bullet
 };
 
 int bullet_count = 0;
-const int bullet_max = 1000;
-Bullet *bullets[bullet_max];
+const int bullet_max = 100;
+Bullet bullets[bullet_max];
 
 int live_invader_count = 0;
 const int live_invader_max = 100;
-Invader *live_invaders[live_invader_max];
+Invader live_invaders[live_invader_max];
 
 int live_emitter_count = 0;
-const int live_emitter_max = 1000;
-Particle_Emitter *live_emitters[live_emitter_max];
+const int emitter_max = 100;
+Particle_Emitter emitters[emitter_max];
 
 const int invader_bitmap_count = 4;
-Bitmap *invader_bitmaps[invader_bitmap_count];
-Bitmap *ship_bitmap;
-Bitmap *bullet_bitmap;
-Bitmap *contrail_bitmap;
+Bitmap invader_bitmaps[invader_bitmap_count];
+Bitmap ship_bitmap;
+Bitmap bullet_bitmap;
+Bitmap contrail_bitmap;
 
 Vector2 ship_position;
 
@@ -225,7 +228,8 @@ void linear_move(Vector2 *position, Vector2 *velocity, float dt)
 
 Particle *spawn_particle(Particle_Emitter *emitter)
 {
-    Particle *p = new Particle;
+    assert(emitter->particle_count < particle_max);
+    Particle *p = &emitter->particles[emitter->particle_count++];
     p->position = emitter->position;
     p->velocity = emitter->velocity;
 
@@ -249,9 +253,6 @@ Particle *spawn_particle(Particle_Emitter *emitter)
     p->velocity.x += v_rel.x;
     p->velocity.y += v_rel.y;
 
-    assert(emitter->particle_count < particle_max);
-    emitter->particles[emitter->particle_count++] = p;
-
     return p;
 }
 
@@ -269,17 +270,20 @@ void sim_particle(Particle *p, float dt)
 
 void update_emitter(Particle_Emitter *emitter)
 {
+    if (!emitter->alive)
+    {
+        return;
+    }
     float dt = current_dt;
     int i = 0;
     while (i < emitter->particle_count)
     {
-        Particle *p = emitter->particles[i];
+        Particle *p = &emitter->particles[i];
         sim_particle(p, dt);
 
         if (p->elapsed > p->lifetime)
         {
             emitter->particles[i] = emitter->particles[--emitter->particle_count];
-            delete p;
         }
         else
         {
@@ -314,15 +318,8 @@ void update_emitter(Particle_Emitter *emitter)
     {
         if (emitter->particle_count == 0)
         {
-            for (int i = 0; i < live_emitter_count; i++)
-            {
-                if (emitter == live_emitters[i])
-                {
-                    live_emitters[i] = live_emitters[--live_emitter_count];
-                    delete emitter;
-                    break;
-                }
-            }
+            emitter->alive = false;
+            live_emitter_count--;
         }
     }
 }
@@ -348,14 +345,14 @@ void init_invader(Invader *invader)
 
 void add_invader()
 {
-    Invader *invader = new Invader;
+    assert(live_invader_count < live_invader_max);
+    Invader *invader = &live_invaders[live_invader_count++];
 
     int which = random_get() % invader_bitmap_count;
-    invader->bitmap = invader_bitmaps[which];
+    invader->bitmap = &invader_bitmaps[which];
+    invader->sleep_countdown = -1.0f;
 
     init_invader(invader);
-    assert(live_invader_count < live_invader_max);
-    live_invaders[live_invader_count++] = invader;
 }
 
 float ilength(float x, float y)
@@ -368,40 +365,72 @@ float distance(Vector2 a, Vector2 b)
 {
     float dx = b.x - a.x;
     float dy = b.y - a.y;
-    return sqrtf(dx*dx + dy*dy);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+Particle_Emitter *spawn_emitter()
+{
+    Particle_Emitter *emitter = NULL;
+    for (int i = 0; i < emitter_max; i++)
+    {
+        if (emitters[i].alive == false)
+        {
+            emitter = &emitters[i];
+            break;
+        }
+    }
+    if (emitter)
+    {
+        emitter->particle_count = 0;
+        emitter->fadeout_period = 0.1f;
+        emitter->particles_per_second = 150.0f;
+        emitter->speed0 = 0;
+        emitter->speed1 = 0.1f;
+        emitter->size0 = 0.001f;
+        emitter->size1 = 0.005f;
+        emitter->drag0 = 0.9999f;
+        emitter->drag1 = 0.9f;
+        emitter->lifetime0 = 0.4f;
+        emitter->lifetime1 = 1.0f;
+        emitter->emitter_lifetime = -1.0f;
+        emitter->theta0 = 0;
+        emitter->theta1 = TAU;
+        emitter->elapsed = 0;
+        emitter->remainder = 0;
+        emitter->producing = true;
+        emitter->alive = true;
+        live_emitter_count++;
+    }
+    return emitter;
 }
 
 void destroy_invader(Invader *invader)
 {
-    {
-        Particle_Emitter *emitter = new Particle_Emitter;
-        assert(live_emitter_count < live_emitter_max);
-        live_emitters[live_emitter_count++] = emitter;
+    Particle_Emitter *emitter = spawn_emitter();
 
-        emitter->velocity.x = 0;
-        emitter->velocity.y = 0;
+    emitter->velocity.x = 0;
 
-        emitter->size0 = 0.01f;
-        emitter->size1 = 0.04f;
+    emitter->velocity.y = 0;
 
-        emitter->color0 = make_vector4(1, 1, 1, 1);
-        emitter->color1 = make_vector4(1, 0.7f, 0.1f, 1);
+    emitter->size0 = 0.01f;
+    emitter->size1 = 0.04f;
 
-        emitter->fadeout_period = 0.3f;
-        emitter->emitter_lifetime = 0.3f;
+    emitter->color0 = make_vector4(1, 1, 1, 1);
+    emitter->color1 = make_vector4(1, 0.7f, 0.1f, 1);
 
-        emitter->position = invader->position;
-    }
-    delete invader;
+    emitter->fadeout_period = 0.3f;
+    emitter->emitter_lifetime = 0.3f;
+
+    emitter->position = invader->position;
 }
 
 bool test_against_invaders(Bullet *bullet)
 {
     for (int i = 0; i < live_invader_count; i++)
     {
-        if (distance(bullet->position, live_invaders[i]->position) < INVADER_RADIUS)
+        if (distance(bullet->position, live_invaders[i].position) < INVADER_RADIUS)
         {
-            destroy_invader(live_invaders[i]);
+            destroy_invader(&live_invaders[i]);
             live_invaders[i] = live_invaders[--live_invader_count];
             return true;
         }
@@ -413,13 +442,19 @@ bool simulate_bullet(Bullet *bullet)
 {
     linear_move(&bullet->position, &bullet->velocity, current_dt);
 
-    if (bullet->position.y > live_y_max) return true;
-    if (bullet->position.y < live_y_min) return true;
+    if (bullet->emitter)
+    {
+        bullet->emitter->position = bullet->position;
+        bullet->emitter->velocity = bullet->velocity;
+    }
 
-    bullet->emitter->position = bullet->position;
-    bullet->emitter->velocity = bullet->velocity;
-    
-    if (test_against_invaders(bullet)) return true;
+    if (bullet->position.y > live_y_max)
+        return true;
+    if (bullet->position.y < live_y_min)
+        return true;
+
+    if (test_against_invaders(bullet))
+        return true;
 
     return false;
 }
@@ -429,14 +464,16 @@ void simulate_bullets()
     int i = 0;
     while (i < bullet_count)
     {
-        Bullet *bullet = bullets[i];
+        Bullet *bullet = &bullets[i];
         bool done = simulate_bullet(bullet);
 
         if (done)
         {
+            if (bullet->emitter)
+            {
+                bullet->emitter->producing = false;
+            }
             bullets[i] = bullets[--bullet_count];
-            bullet->emitter->producing = false;
-            delete bullet;
         }
         else
         {
@@ -479,39 +516,45 @@ void simulate_invader(Invader *invader)
 
 void simulate_invaders()
 {
-    // sleep_countdown
     for (int i = 0; i < live_invader_count; i++)
     {
-        simulate_invader(live_invaders[i]);
+        simulate_invader(&live_invaders[i]);
+    }
+}
+
+void simulate_emitters()
+{
+    for (int i = 0; i < emitter_max; i++)
+    {
+        update_emitter(&emitters[i]);
     }
 }
 
 Bullet *fire_bullet()
 {
-    Bullet *bullet = new Bullet;
+    assert(bullet_count < bullet_max);
+    Bullet *bullet = &bullets[bullet_count++];
 
     bullet->position = ship_position;
 
     bullet->velocity.x = 0;
     bullet->velocity.y = 0.4f;
 
-    bullet->emitter = new Particle_Emitter;
-    bullet->emitter->theta0 = TAU * 0.6f;
-    bullet->emitter->theta1 = TAU * 0.9f;
-    bullet->emitter->drag0 = 0.9f;
-    bullet->emitter->drag1 = 0.97f;
+    bullet->emitter = spawn_emitter();
 
-    assert(live_emitter_count < live_emitter_max);
-    live_emitters[live_emitter_count++] = bullet->emitter;
+    if (bullet->emitter)
+    {
+        bullet->emitter->theta0 = TAU * 0.6f;
+        bullet->emitter->theta1 = TAU * 0.9f;
+        bullet->emitter->drag0 = 0.9f;
+        bullet->emitter->drag1 = 0.97f;
 
-    float k0 = 1.0f;
-    float k1 = 0.1f;
+        float k0 = 1.0f;
+        float k1 = 0.1f;
 
-    bullet->emitter->color0 = make_vector4(k0, k0, k0, 1);
-    bullet->emitter->color1 = make_vector4(k1, k1, k1, 1);
-
-    assert(bullet_count < bullet_max);
-    bullets[bullet_count++] = bullet;
+        bullet->emitter->color0 = make_vector4(k0, k0, k0, 1);
+        bullet->emitter->color1 = make_vector4(k1, k1, k1, 1);
+    }
 
     return bullet;
 }
@@ -547,8 +590,9 @@ void invaders_simulate()
 
         Event event;
         bool received = get_next_event(&event);
-        if (!received) break;
-        
+        if (!received)
+            break;
+
         if (event.type == EVENT_TYPE_QUIT)
         {
             should_quit_game = true;
@@ -629,14 +673,9 @@ void invaders_simulate()
     {
         ship_position.y = y1;
     }
-
     simulate_bullets();
     simulate_invaders();
-
-    for (int i = 0; i < live_emitter_count; i++)
-    {
-        update_emitter(live_emitters[i]);
-    }
+    simulate_emitters();
 }
 
 void init_gl_for_bitmap(Bitmap *bitmap)
@@ -649,7 +688,7 @@ void init_gl_for_bitmap(Bitmap *bitmap)
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-Bitmap *load_bitmap(const char *filename)
+void load_bitmap(const char *filename, Bitmap *result)
 {
     int width = 0;
     int height = 0;
@@ -657,29 +696,26 @@ Bitmap *load_bitmap(const char *filename)
     uint8_t *data = stbi_load(filename, &width, &height, NULL, 0);
     if (!data)
     {
-        return NULL;
+        return;
     }
 
-    Bitmap *result = new Bitmap;
     result->width = width;
     result->height = height;
     result->data = data;
 
     init_gl_for_bitmap(result);
-
-    return result;
 }
 
 void init_textures()
 {
-    ship_bitmap = load_bitmap("ship.png");
-    bullet_bitmap = load_bitmap("bullet.png");
-    contrail_bitmap = load_bitmap("contrail.png");
+    load_bitmap("ship.png", &ship_bitmap);
+    load_bitmap("bullet.png", &bullet_bitmap);
+    load_bitmap("contrail.png", &contrail_bitmap);
 
-    invader_bitmaps[0] = load_bitmap("bug1.png");
-    invader_bitmaps[1] = load_bitmap("bug2.png");
-    invader_bitmaps[2] = load_bitmap("bug3.png");
-    invader_bitmaps[3] = load_bitmap("bug4.png");
+    load_bitmap("bug1.png", &invader_bitmaps[0]);
+    load_bitmap("bug2.png", &invader_bitmaps[1]);
+    load_bitmap("bug3.png", &invader_bitmaps[2]);
+    load_bitmap("bug4.png", &invader_bitmaps[3]);
 }
 
 void draw_gradient()
@@ -795,13 +831,13 @@ void draw_quad_centered_at(Vector2 position, float radius)
 
 void draw_emitter(Particle_Emitter *emitter)
 {
-    glBindTexture(GL_TEXTURE_2D, contrail_bitmap->id);
+    glBindTexture(GL_TEXTURE_2D, contrail_bitmap.id);
 
     glBegin(GL_TRIANGLES);
 
     for (int i = 0; i < emitter->particle_count; i++)
     {
-        Particle *p = emitter->particles[i];
+        Particle *p = &emitter->particles[i];
 
         float alpha = 1.0f;
 
@@ -809,8 +845,10 @@ void draw_emitter(Particle_Emitter *emitter)
         if (tail_time < emitter->fadeout_period)
         {
             float t = tail_time / emitter->fadeout_period;
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
+            if (t < 0)
+                t = 0;
+            if (t > 1)
+                t = 1;
             alpha = t;
         }
 
@@ -827,7 +865,7 @@ void draw_bullet(Bullet *bullet)
     Vector2 position = bullet->position;
     float bullet_size = 0.02f;
 
-    glBindTexture(GL_TEXTURE_2D, bullet_bitmap->id);
+    glBindTexture(GL_TEXTURE_2D, bullet_bitmap.id);
     glBegin(GL_TRIANGLES);
     glColor4f(1, 1, 1, 1);
     draw_quad_centered_at(position, bullet_size);
@@ -837,7 +875,7 @@ void draw_bullet(Bullet *bullet)
 void draw_ship()
 {
     float ship_size = 0.04f;
-    glBindTexture(GL_TEXTURE_2D, ship_bitmap->id);
+    glBindTexture(GL_TEXTURE_2D, ship_bitmap.id);
     glBegin(GL_TRIANGLES);
     glColor4f(1, 1, 1, 1);
     draw_quad_centered_at(ship_position, ship_size);
@@ -896,15 +934,15 @@ int invaders()
 
         for (int i = 0; i < bullet_count; i++)
         {
-            draw_bullet(bullets[i]);
+            draw_bullet(&bullets[i]);
         }
         for (int i = 0; i < live_invader_count; i++)
         {
-            draw_invader(live_invaders[i]);
+            draw_invader(&live_invaders[i]);
         }
         for (int i = 0; i < live_emitter_count; i++)
         {
-            draw_emitter(live_emitters[i]);
+            draw_emitter(&emitters[i]);
         }
 
         swap_buffers();

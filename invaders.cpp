@@ -127,7 +127,7 @@ struct Bullet
 };
 
 int bullet_count = 0;
-const int bullet_max = 100;
+const int bullet_max = 200;
 Bullet bullets[bullet_max];
 
 int live_invader_count = 0;
@@ -135,7 +135,7 @@ const int live_invader_max = 100;
 Invader live_invaders[live_invader_max];
 
 int live_emitter_count = 0;
-const int emitter_max = 100;
+const int emitter_max = 200;
 Particle_Emitter emitters[emitter_max];
 
 const int invader_bitmap_count = 4;
@@ -408,20 +408,23 @@ void destroy_invader(Invader *invader)
 {
     Particle_Emitter *emitter = spawn_emitter();
 
-    emitter->velocity.x = 0;
+    if (emitter)
+    {
+        emitter->velocity.x = 0;
 
-    emitter->velocity.y = 0;
+        emitter->velocity.y = 0;
 
-    emitter->size0 = 0.01f;
-    emitter->size1 = 0.04f;
+        emitter->size0 = 0.01f;
+        emitter->size1 = 0.04f;
 
-    emitter->color0 = make_vector4(1, 1, 1, 1);
-    emitter->color1 = make_vector4(1, 0.7f, 0.1f, 1);
+        emitter->color0 = make_vector4(1, 1, 1, 1);
+        emitter->color1 = make_vector4(1, 0.7f, 0.1f, 1);
 
-    emitter->fadeout_period = 0.3f;
-    emitter->emitter_lifetime = 0.3f;
+        emitter->fadeout_period = 0.3f;
+        emitter->emitter_lifetime = 0.3f;
 
-    emitter->position = invader->position;
+        emitter->position = invader->position;
+    }
 }
 
 bool test_against_invaders(Bullet *bullet)
@@ -532,7 +535,9 @@ void simulate_emitters()
 
 Bullet *fire_bullet()
 {
-    assert(bullet_count < bullet_max);
+    if (bullet_count >= bullet_max)
+        return NULL;
+
     Bullet *bullet = &bullets[bullet_count++];
 
     bullet->position = ship_position;
@@ -565,9 +570,10 @@ void do_fire_bullets()
     Bullet *right = fire_bullet();
 
     float offset = 0.023f;
-
-    left->position.x -= offset;
-    right->position.x += offset;
+    if (left)
+        left->position.x -= offset;
+    if (right)
+        right->position.x += offset;
 
     num_shots_fired += 1;
 }

@@ -121,7 +121,7 @@ bool get_next_event(Event *event)
         *event = events[event_buffer_first++];
         if (event_buffer_first == event_buffer_max)
         {
-            event_buffer_last = 0;
+            event_buffer_first = 0;
         }
         return true;
     }
